@@ -7,7 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 const upload = multer(); // memory storage
 const app = express();
 
-app.use(cors()); // allow cross-origin requests (for testing). For production restrict this to your Pages origin.
+app.use(cors()); // allow cross-origin requests (for testing). For production restrict to your Pages origin.
 app.use(express.json());
 
 const OWNER = process.env.REPO_OWNER;     // your GitHub username
@@ -23,11 +23,13 @@ const octokit = new Octokit({ auth: TOKEN });
 
 app.get('/', (req, res) => res.send('GitHub uploader running'));
 
-// Upload endpoint
+// Upload endpoint: accepts multiple files in "files" field and optional "bg" field with filename to use as background
 app.post('/upload', upload.array('files'), async (req, res) => {
   try {
     const files = req.files || [];
     if (!files.length) return res.status(400).json({ error: 'No files uploaded' });
+
+    const bgName = req.body && req.body.bg ? String(req.body.bg) : null;
 
     const id = uuidv4().replace(/-/g, '');
     const repoInfo = await octokit.repos.get({ owner: OWNER, repo: REPO });
@@ -56,7 +58,16 @@ app.post('/upload', upload.array('files'), async (req, res) => {
       });
     }
 
+    // Determine background track info (if bgName provided and matches uploaded file)
+    let background = null;
+    if (bgName) {
+      const match = uploaded.find(u => u.name === bgName);
+      if (match) background = { name: match.name, url: match.url };
+    }
+
     const shareObj = { id, created_at: new Date().toISOString(), files: uploaded };
+    if (background) shareObj.background = background;
+
     const sharePath = `shares/${id}.json`;
     const shareContentBase64 = Buffer.from(JSON.stringify(shareObj, null, 2)).toString('base64');
 
