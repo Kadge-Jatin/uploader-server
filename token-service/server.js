@@ -10,9 +10,15 @@
  * - PUBLIC_SETUP_URL
  * - RAZORPAY_KEY_ID
  * - RAZORPAY_KEY_SECRET
+ * - RAZORPAY_WEBHOOK_SECRET   <-- webhook signing secret (used to verify x-razorpay-signature)
  * - CLAIM_RETURN_BASE (optional, defaults to https://valentines-token-service.onrender.com)
  * - PURCHASE_TTL_SECONDS (optional, default 7200)
+ *
+ * Notes:
+ * - Make sure RAZORPAY_KEY_SECRET is your API key secret (for Basic auth).
+ * - Make sure RAZORPAY_WEBHOOK_SECRET is the webhook signing secret you configured in Razorpay.
  */
+
 const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
@@ -23,21 +29,24 @@ const axios = require('axios');
 
 const app = express();
 app.use(express.json({
-  verify: (req, res, buf) => { req.rawBody = buf; }
+  verify: (req, res, buf) => { req.rawBody = buf; } // keep raw body for webhook signature verification
 }));
 app.use(cors());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// config
+// config from env
 const REDIS_URL = process.env.REDIS_URL || '';
 if (!REDIS_URL) console.warn('WARNING: REDIS_URL not set');
 const redis = new Redis(REDIS_URL);
 
 const ADMIN_SECRET = process.env.ADMIN_SECRET || 'changeme';
 const PUBLIC_SETUP_URL = process.env.PUBLIC_SETUP_URL || 'https://Kadge-Jatin.github.io/Valentines-Gifts_3/setup.html';
+
 const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || '';
-const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || '';
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || ''; // API Key Secret (Basic auth)
+const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || ''; // webhook signing secret
+
 const CLAIM_RETURN_BASE = process.env.CLAIM_RETURN_BASE || `https://${process.env.RENDER_EXTERNAL_URL || 'valentines-token-service.onrender.com'}`;
 const PURCHASE_TTL = parseInt(process.env.PURCHASE_TTL_SECONDS || '7200', 10);
 
@@ -123,18 +132,22 @@ app.post('/create-payment-link', async (req, res) => {
   }
 });
 
-// Razorpay webhook: verify signature (if set) and issue purchase token
+// Razorpay webhook: verify signature (if webhook secret set) and issue purchase token
 app.post('/razorpay-webhook', async (req, res) => {
   try {
     const sig = req.headers['x-razorpay-signature'] || '';
     const body = req.rawBody ? req.rawBody.toString() : JSON.stringify(req.body || {});
 
-    if (RAZORPAY_KEY_SECRET) {
-      const expected = crypto.createHmac('sha256', RAZORPAY_KEY_SECRET).update(body).digest('hex');
+    // Use webhook-specific secret to verify signature (do not use API secret)
+    if (RAZORPAY_WEBHOOK_SECRET) {
+      const expected = crypto.createHmac('sha256', RAZORPAY_WEBHOOK_SECRET).update(body).digest('hex');
       if (sig !== expected) {
         console.warn('razorpay signature mismatch');
         return res.status(400).send('invalid signature');
       }
+    } else {
+      // If webhook secret not configured, log a warning (less secure)
+      console.warn('RAZORPAY_WEBHOOK_SECRET not set — skipping webhook signature verification');
     }
 
     // extract payment id if present
@@ -168,6 +181,7 @@ app.get('/claim-return', async (req, res) => {
     if (!token) {
       token = await issuePurchaseToken({ paymentId });
     } else {
+      // extend TTLs so buyer has time to use the token after redirect
       try {
         await redis.expire(purchaseKey(token), PURCHASE_TTL);
         await redis.expire(paymentKey(paymentId), PURCHASE_TTL);
