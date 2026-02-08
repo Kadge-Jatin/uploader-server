@@ -10,13 +10,9 @@
  * - PUBLIC_SETUP_URL
  * - RAZORPAY_KEY_ID
  * - RAZORPAY_KEY_SECRET
- * - RAZORPAY_WEBHOOK_SECRET   <-- webhook signing secret (used to verify x-razorpay-signature)
+ * - RAZORPAY_WEBHOOK_SECRET
  * - CLAIM_RETURN_BASE (optional, defaults to https://valentines-token-service.onrender.com)
  * - PURCHASE_TTL_SECONDS (optional, default 7200)
- *
- * Notes:
- * - Make sure RAZORPAY_KEY_SECRET is your API key secret (for Basic auth).
- * - Make sure RAZORPAY_WEBHOOK_SECRET is the webhook signing secret you configured in Razorpay.
  */
 
 const express = require('express');
@@ -146,11 +142,10 @@ app.post('/razorpay-webhook', async (req, res) => {
         return res.status(400).send('invalid signature');
       }
     } else {
-      // If webhook secret not configured, log a warning (less secure)
       console.warn('RAZORPAY_WEBHOOK_SECRET not set — skipping webhook signature verification');
     }
 
-    // extract payment id if present
+    // extract payment id if present in webhook payload
     let paymentId = `razorpay_${Date.now()}`;
     try {
       if (req.body && req.body.payload) {
@@ -173,8 +168,24 @@ app.post('/razorpay-webhook', async (req, res) => {
 // Claim-return route for Razorpay redirect after payment
 app.get('/claim-return', async (req, res) => {
   try {
-    const paymentId = req.query.payment_id || req.query.paymentId || req.query.paymentid || req.query.payment;
-    if (!paymentId) return res.status(400).send('missing payment_id');
+    // Accept multiple possible query param names Razorpay may use in redirects:
+    // - payment_id, paymentId, payment, razorpay_payment_id
+    // - payment link ids: razorpay_payment_link_id, razorpay_payment_link_reference_id
+    const paymentId =
+      req.query.payment_id ||
+      req.query.paymentId ||
+      req.query.payment ||
+      req.query.razorpay_payment_id ||
+      req.query.razorpay_paymentId ||
+      req.query.razorpay_payment_link_id ||
+      req.query.razorpay_payment_link_reference_id ||
+      null;
+
+    if (!paymentId) {
+      // helpful debug message including the full query for troubleshooting
+      console.warn('claim-return missing payment_id - query:', req.query);
+      return res.status(400).send('missing payment_id');
+    }
 
     // If a token already exists for this payment, reuse it
     let token = await redis.get(paymentKey(paymentId));
