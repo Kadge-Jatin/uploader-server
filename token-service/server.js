@@ -1,27 +1,25 @@
 /**
- * Minimal token-service: issue & verify short-lived purchase tokens in Redis.
+ * Token service with:
+ * - /create-payment-link (creates Razorpay payment links)
+ * - /razorpay-webhook (verifies webhook and issues tokens)
+ * - /claim-return (redirect buyer after payment to PUBLIC_SETUP_URL#token=)
  *
- * Env vars required:
+ * Required env vars:
  * - REDIS_URL
  * - ADMIN_SECRET
- * - PUBLIC_SETUP_URL  (e.g. https://Kadge-Jatin.github.io/Valentines-Gifts_3/setup.html)
+ * - PUBLIC_SETUP_URL
+ * - RAZORPAY_KEY_ID
+ * - RAZORPAY_KEY_SECRET
+ * - CLAIM_RETURN_BASE (optional, defaults to https://valentines-token-service.onrender.com)
  * - PURCHASE_TTL_SECONDS (optional, default 7200)
- * - RAZORPAY_KEY_SECRET (optional; set when you configure Razorpay webhook)
- *
- * This version adds a /claim-return route so Razorpay can redirect the buyer
- * after payment. The route will:
- *  - accept a payment id query param (payment_id / paymentId / payment)
- *  - reuse an already-created token for that payment if present
- *  - otherwise issue a new token and store a payment -> token mapping
- *  - redirect the buyer to PUBLIC_SETUP_URL#token=<token>
  */
-
 const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
 const Redis = require('ioredis');
 const { v4: uuidv4 } = require('uuid');
 const cors = require('cors');
+const axios = require('axios');
 
 const app = express();
 app.use(express.json({
@@ -38,21 +36,21 @@ const redis = new Redis(REDIS_URL);
 
 const ADMIN_SECRET = process.env.ADMIN_SECRET || 'changeme';
 const PUBLIC_SETUP_URL = process.env.PUBLIC_SETUP_URL || 'https://Kadge-Jatin.github.io/Valentines-Gifts_3/setup.html';
+const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || '';
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || '';
+const CLAIM_RETURN_BASE = process.env.CLAIM_RETURN_BASE || `https://${process.env.RENDER_EXTERNAL_URL || 'valentines-token-service.onrender.com'}`;
 const PURCHASE_TTL = parseInt(process.env.PURCHASE_TTL_SECONDS || '7200', 10);
 
 const purchaseKey = (token) => `purchase:${token}`;
 const paymentKey = (paymentId) => `payment:${paymentId}`;
 
 // issue a purchase token and store it in Redis with TTL
-// also store a mapping from paymentId -> token when paymentId is provided
 async function issuePurchaseToken(meta = {}) {
   const token = uuidv4();
   const key = purchaseKey(token);
   const stored = Object.assign({ createdAt: Date.now() }, meta);
   await redis.set(key, JSON.stringify(stored), 'EX', PURCHASE_TTL);
 
-  // if meta.paymentId exists, store a reverse mapping so we can reuse tokens on redirect
   if (meta.paymentId) {
     try {
       await redis.set(paymentKey(meta.paymentId), token, 'EX', PURCHASE_TTL);
@@ -60,7 +58,6 @@ async function issuePurchaseToken(meta = {}) {
       console.warn('failed to set payment->token mapping', e);
     }
   }
-
   return token;
 }
 
@@ -72,7 +69,7 @@ async function verifyPurchaseToken(token) {
   try { return JSON.parse(raw); } catch { return null; }
 }
 
-// Admin helper: create a purchase token manually for testing
+// Admin: create token manually
 app.post('/admin/issue-token', async (req, res) => {
   const secret = req.headers['x-admin-secret'];
   if (!secret || secret !== ADMIN_SECRET) return res.status(401).json({ error: 'unauthorized' });
@@ -91,7 +88,42 @@ app.get('/verify-purchase', async (req, res) => {
   return res.json({ valid: true, meta });
 });
 
-// Razorpay webhook: verify signature (if RAZORPAY_KEY_SECRET set) and issue purchase token
+// Create Razorpay payment link (called by frontend)
+app.post('/create-payment-link', async (req, res) => {
+  try {
+    if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
+      return res.status(500).json({ error: 'razorpay keys not configured' });
+    }
+    const amountRs = Number(req.body.amount || 1);
+    const amountPaise = Math.max(1, Math.round(amountRs * 100));
+
+    const payload = {
+      amount: amountPaise,
+      currency: 'INR',
+      accept_partial: false,
+      description: 'Valentines gift',
+      reference_id: `ref_${Date.now()}`,
+      callback_url: `${CLAIM_RETURN_BASE}/claim-return`,
+      callback_method: 'get'
+    };
+
+    const auth = Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64');
+    const r = await axios.post('https://api.razorpay.com/v1/payment_links', payload, {
+      headers: {
+        Authorization: `Basic ${auth}`,
+        'Content-Type': 'application/json'
+      },
+      timeout: 10000
+    });
+
+    return res.json(r.data);
+  } catch (err) {
+    console.error('create-payment-link error', err?.response?.data || err.message || err);
+    return res.status(500).json({ error: 'failed to create payment link', detail: err?.response?.data || err.message });
+  }
+});
+
+// Razorpay webhook: verify signature (if set) and issue purchase token
 app.post('/razorpay-webhook', async (req, res) => {
   try {
     const sig = req.headers['x-razorpay-signature'] || '';
@@ -126,9 +158,6 @@ app.post('/razorpay-webhook', async (req, res) => {
 });
 
 // Claim-return route for Razorpay redirect after payment
-// Example: Razorpay can be configured to redirect to:
-//   https://valentines-token-service.onrender.com/claim-return
-// Razorpay typically appends payment_id or other query params; this route accepts common names.
 app.get('/claim-return', async (req, res) => {
   try {
     const paymentId = req.query.payment_id || req.query.paymentId || req.query.paymentid || req.query.payment;
@@ -137,12 +166,8 @@ app.get('/claim-return', async (req, res) => {
     // If a token already exists for this payment, reuse it
     let token = await redis.get(paymentKey(paymentId));
     if (!token) {
-      // No existing token: issue a new one and set mapping
       token = await issuePurchaseToken({ paymentId });
-      // issuePurchaseToken already sets the payment->token mapping
     } else {
-      // token is stored as a plain string
-      // extend TTL for the token and mapping so buyer has time to use it
       try {
         await redis.expire(purchaseKey(token), PURCHASE_TTL);
         await redis.expire(paymentKey(paymentId), PURCHASE_TTL);
@@ -152,7 +177,6 @@ app.get('/claim-return', async (req, res) => {
     }
 
     const claimUrl = `${PUBLIC_SETUP_URL}#token=${encodeURIComponent(token)}`;
-    // Redirect the buyer to the client setup page with the token in the fragment
     return res.redirect(claimUrl);
   } catch (err) {
     console.error('claim-return error', err);
@@ -161,11 +185,7 @@ app.get('/claim-return', async (req, res) => {
 });
 
 app.get('/health', (req, res) => res.json({ ok: true }));
-
-// serve landing.html at root so GET / works
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'landing.html'));
-});
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'landing.html')));
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Token service listening on ${port}`));
