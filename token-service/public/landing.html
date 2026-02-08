@@ -8,11 +8,15 @@
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial; padding:20px; max-width:720px; margin: auto; color:#222; }
     .card { border:1px solid #eee; padding:18px; border-radius:10px; margin-top:18px; text-align:center; }
     .hero { text-align:center; margin-top:10px; }
-    .buy { display:inline-block; background:#e83e8c; color:white; padding:12px 20px; border-radius:8px; text-decoration:none; font-weight:600; border:0; cursor:pointer; }
+    .price { font-size:20px; margin-top:8px; }
+    .price .now { color:#e83e8c; font-weight:700; margin-right:8px; }
+    .price .was { color:#777; text-decoration:line-through; font-weight:600; }
+    .buy { display:inline-block; background:#e83e8c; color:white; padding:12px 20px; border-radius:8px; text-decoration:none; font-weight:700; border:0; cursor:pointer; font-size:16px; }
     .note { color:#666; font-size:14px; margin-top:12px; }
     img.demo { max-width:100%; border-radius:8px; margin-top:12px; }
     .status { margin-top:12px; color:#444; font-size:14px; }
     .status a { color: #e83e8c; font-weight:600; text-decoration:none; }
+    .muted { color:#888; font-size:13px; margin-top:10px; }
   </style>
 </head>
 <body>
@@ -32,13 +36,25 @@
 
     <img class="demo" src="https://via.placeholder.com/600x280?text=Valentine+Demo" alt="Demo">
 
-    <p style="margin-top:12px">
-      <button id="buyBtn" class="buy">Buy now — ₹1</button>
-    </p>
+    <div style="margin-top:12px">
+      <!-- Primary buy button. The script below will navigate to PAYMENT_LINK when clicked.
+           Replace the string below with your Razorpay short_url (e.g. "https://rzp.io/abcd"). -->
+      <button id="buyBtn" class="buy" aria-live="polite" aria-busy="false">
+        Buy now — <span class="now">₹200</span> <span class="was">₹250</span>
+      </button>
+
+      <!-- Non-JS fallback link (replace href with your short_url as well) -->
+      <noscript>
+        <p style="margin-top:8px">
+          <a class="buy" href="https://rzp.io/your_short_url_here">Buy now — ₹200 <s>₹250</s></a>
+        </p>
+      </noscript>
+    </div>
 
     <div id="status" class="status" aria-live="polite"></div>
 
     <p class="note">This is a demo flow. Setup access is valid for 2 hours after purchase.</p>
+    <p class="muted">Note: If the Razorpay short link is single‑use it will be unusable after someone pays. If you want an always‑open experience, use the server create-payment-link API instead (requires API keys).</p>
   </div>
 
   <p style="text-align:center; margin-top:18px; color:#666; font-size:13px;">
@@ -47,6 +63,10 @@
 
 <script>
 (function () {
+  // Replace this with the Razorpay short_url you created in the dashboard.
+  // Example: const PAYMENT_LINK = 'https://rzp.io/abcd'
+  const PAYMENT_LINK = 'https://rzp.io/your_short_url_here';
+
   const buyBtn = document.getElementById('buyBtn');
   const statusEl = document.getElementById('status');
 
@@ -55,42 +75,25 @@
     statusEl.style.color = isError ? '#b00020' : '#444';
   }
 
-  buyBtn.addEventListener('click', async function () {
-    buyBtn.disabled = true;
-    buyBtn.textContent = 'Creating payment...';
-    setStatus('');
+  buyBtn.addEventListener('click', function () {
+    if (!PAYMENT_LINK || PAYMENT_LINK.includes('your_short_url_here')) {
+      setStatus('Payment link not configured. Replace PAYMENT_LINK in the page with your Razorpay short_url.', true);
+      return;
+    }
 
     try {
-      const resp = await fetch('/create-payment-link', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: 1 })
-      });
+      buyBtn.disabled = true;
+      buyBtn.setAttribute('aria-busy', 'true');
+      buyBtn.textContent = 'Opening payment...';
 
-      const data = await resp.json().catch(() => ({}));
-
-      if (!resp.ok) {
-        console.error('create-payment-link failed', data);
-        setStatus('Failed to create payment link. Try again or check console.', true);
-        return;
-      }
-
-      // Razorpay API returns short_url or short_link; accept common variants
-      const url = data.short_url || data.shortLink || data.shortUrl || data.short_link || data.short_link_url;
-      if (!url) {
-        console.error('create-payment-link response missing short_url', data);
-        setStatus('Payment link created but server did not return a short_url. Check logs.', true);
-        return;
-      }
-
-      // Redirect user to the Razorpay payment page (same tab so callback works)
-      window.location.href = url;
+      // Use same-tab navigation so Razorpay can redirect back to /claim-return and the flow completes.
+      window.location.href = PAYMENT_LINK;
     } catch (err) {
-      console.error('Buy error', err);
-      setStatus('Network error creating payment link. Try again.', true);
-    } finally {
+      console.error('Error redirecting to payment link', err);
+      setStatus('Failed to open payment link. Try again.', true);
       buyBtn.disabled = false;
-      buyBtn.textContent = 'Buy now — ₹1';
+      buyBtn.setAttribute('aria-busy', 'false');
+      buyBtn.textContent = 'Buy now — ₹200 ₹250';
     }
   });
 })();
