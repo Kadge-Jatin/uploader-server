@@ -1,8 +1,12 @@
 /**
- * Token service with:
- * - /create-payment-link (creates Razorpay payment links)
- * - /razorpay-webhook (verifies webhook and issues tokens)
- * - /claim-return (redirect buyer after payment to PUBLIC_SETUP_URL#token=)
+ * Token service (strict expiry + setup verification support)
+ *
+ * Behaviour changes implemented:
+ * - PURCHASE_TTL is parsed safely and logged.
+ * - issuePurchaseToken sets the payment->token mapping using NX so a mapping is only created once.
+ * - Webhook will reuse existing mapping if present; otherwise it creates a new token and mapping.
+ * - /claim-return will NOT create a new token when mapping is missing; it returns 410 Gone.
+ * - /claim-return no longer extends TTL on redirect (strict expiry).
  *
  * Required env vars:
  * - REDIS_URL
@@ -11,7 +15,7 @@
  * - RAZORPAY_KEY_ID
  * - RAZORPAY_KEY_SECRET
  * - RAZORPAY_WEBHOOK_SECRET
- * - CLAIM_RETURN_BASE (optional, defaults to https://valentines-token-service.onrender.com)
+ * - CLAIM_RETURN_BASE (optional)
  * - PURCHASE_TTL_SECONDS (optional, default 7200)
  */
 
@@ -44,7 +48,6 @@ const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || ''; // API Key Se
 const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || ''; // webhook signing secret
 
 const CLAIM_RETURN_BASE = process.env.CLAIM_RETURN_BASE || `https://${process.env.RENDER_EXTERNAL_URL || 'valentines-token-service.onrender.com'}`;
-// const PURCHASE_TTL = parseInt(process.env.PURCHASE_TTL_SECONDS || '7200', 10);
 
 // safe PURCHASE_TTL parsing with fallback to 7200 seconds (2 hours)
 const _envTtl = Number(process.env.PURCHASE_TTL_SECONDS);
@@ -54,21 +57,35 @@ console.log('PURCHASE_TTL set to', PURCHASE_TTL);
 const purchaseKey = (token) => `purchase:${token}`;
 const paymentKey = (paymentId) => `payment:${paymentId}`;
 
-// issue a purchase token and store it in Redis with TTL
+/**
+ * issuePurchaseToken(meta)
+ * - Creates a new token and stores purchase:<token> with TTL
+ * - If meta.paymentId is provided, attempts to set payment:<paymentId> -> token using NX (won't overwrite)
+ * - Returns an object: { token, createdMapping } where createdMapping is true if the payment mapping was created by this call
+ */
 async function issuePurchaseToken(meta = {}) {
   const token = uuidv4();
   const key = purchaseKey(token);
   const stored = Object.assign({ createdAt: Date.now() }, meta);
-  await redis.set(key, JSON.stringify(stored), 'EX', PURCHASE_TTL);
 
+  // store token data with expiry
+  await redis.set(key, JSON.stringify(stored), 'EX', PURCHASE_TTL);
+  console.log('issued token', token, 'ttl', PURCHASE_TTL);
+
+  let createdMapping = false;
   if (meta.paymentId) {
     try {
-      await redis.set(paymentKey(meta.paymentId), token, 'EX', PURCHASE_TTL);
+      // set payment->token only if not already present (NX)
+      // ioredis set(key, value, 'EX', seconds, 'NX') returns 'OK' if set, null otherwise
+      const setResult = await redis.set(paymentKey(meta.paymentId), token, 'EX', PURCHASE_TTL, 'NX');
+      createdMapping = setResult === 'OK';
+      console.log('payment mapping for', meta.paymentId, createdMapping ? 'created' : 'already existed');
     } catch (e) {
       console.warn('failed to set payment->token mapping', e);
     }
   }
-  return token;
+
+  return { token, createdMapping };
 }
 
 // verify a purchase token (return stored meta or null)
@@ -84,12 +101,14 @@ app.post('/admin/issue-token', async (req, res) => {
   const secret = req.headers['x-admin-secret'];
   if (!secret || secret !== ADMIN_SECRET) return res.status(401).json({ error: 'unauthorized' });
   const paymentId = req.body.paymentId || `manual_${Date.now()}`;
-  const token = await issuePurchaseToken({ paymentId });
+
+  // create token and attempt to map (mapping will be created only if absent)
+  const { token } = await issuePurchaseToken({ paymentId });
   const claimUrl = `${PUBLIC_SETUP_URL}#token=${encodeURIComponent(token)}`;
   return res.json({ success: true, token, claimUrl, expiresInSec: PURCHASE_TTL });
 });
 
-// Verify endpoint used by uploader-server before accepting uploads
+// Verify endpoint used by setup page or uploader-server before accepting uploads
 app.get('/verify-purchase', async (req, res) => {
   const token = req.query.token || (req.headers['authorization'] && String(req.headers['authorization']).startsWith('Bearer ') ? String(req.headers['authorization']).slice(7) : null);
   if (!token) return res.status(400).json({ error: 'missing_token' });
@@ -133,13 +152,12 @@ app.post('/create-payment-link', async (req, res) => {
   }
 });
 
-// Razorpay webhook: verify signature (if webhook secret set) and issue purchase token
+// Razorpay webhook: verify signature and issue purchase token only if mapping absent
 app.post('/razorpay-webhook', async (req, res) => {
   try {
     const sig = req.headers['x-razorpay-signature'] || '';
     const body = req.rawBody ? req.rawBody.toString() : JSON.stringify(req.body || {});
 
-    // Use webhook-specific secret to verify signature (do not use API secret)
     if (RAZORPAY_WEBHOOK_SECRET) {
       const expected = crypto.createHmac('sha256', RAZORPAY_WEBHOOK_SECRET).update(body).digest('hex');
       if (sig !== expected) {
@@ -160,10 +178,19 @@ app.post('/razorpay-webhook', async (req, res) => {
       }
     } catch (e) { /* ignore */ }
 
-    const purchaseToken = await issuePurchaseToken({ paymentId, event: req.body.event || null });
-    const claimUrl = `${PUBLIC_SETUP_URL}#token=${encodeURIComponent(purchaseToken)}`;
-    console.log('Issued purchase token:', purchaseToken, 'claimUrl:', claimUrl);
-    return res.json({ ok: true, claimUrl });
+    // If mapping already exists, reuse that token
+    const existing = await redis.get(paymentKey(paymentId));
+    if (existing) {
+      console.log('webhook: mapping exists for', paymentId, 'reusing token', existing);
+      const claimUrl = `${PUBLIC_SETUP_URL}#token=${encodeURIComponent(existing)}`;
+      return res.json({ ok: true, claimUrl, reused: true });
+    }
+
+    // create token and mapping (mapping will be set using NX from issuePurchaseToken)
+    const { token } = await issuePurchaseToken({ paymentId, event: req.body.event || null });
+    const claimUrl = `${PUBLIC_SETUP_URL}#token=${encodeURIComponent(token)}`;
+    console.log('webhook: created token', token, 'for payment', paymentId);
+    return res.json({ ok: true, claimUrl, created: true });
   } catch (err) {
     console.error('webhook error', err);
     return res.status(500).send('server error');
@@ -171,11 +198,10 @@ app.post('/razorpay-webhook', async (req, res) => {
 });
 
 // Claim-return route for Razorpay redirect after payment
+// STRICT: Do NOT create a new token if mapping missing. Only reuse existing mapping.
+// This ensures that once the mapping's TTL expires, the setup link is no longer usable.
 app.get('/claim-return', async (req, res) => {
   try {
-    // Accept multiple possible query param names Razorpay may use in redirects:
-    // - payment_id, paymentId, payment, razorpay_payment_id
-    // - payment link ids: razorpay_payment_link_id, razorpay_payment_link_reference_id
     const paymentId =
       req.query.payment_id ||
       req.query.paymentId ||
@@ -187,23 +213,15 @@ app.get('/claim-return', async (req, res) => {
       null;
 
     if (!paymentId) {
-      // helpful debug message including the full query for troubleshooting
       console.warn('claim-return missing payment_id - query:', req.query);
       return res.status(400).send('missing payment_id');
     }
 
-    // If a token already exists for this payment, reuse it
-    let token = await redis.get(paymentKey(paymentId));
+    // Strict behavior: only reuse existing token, do NOT create a new one here
+    const token = await redis.get(paymentKey(paymentId));
     if (!token) {
-      token = await issuePurchaseToken({ paymentId });
-    } else {
-      // extend TTLs so buyer has time to use the token after redirect
-      try {
-        await redis.expire(purchaseKey(token), PURCHASE_TTL);
-        await redis.expire(paymentKey(paymentId), PURCHASE_TTL);
-      } catch (e) {
-        console.warn('failed to extend TTLs', e);
-      }
+      console.warn('claim-return: mapping missing or expired for', paymentId);
+      return res.status(410).send('Link expired or not found for this payment.');
     }
 
     const claimUrl = `${PUBLIC_SETUP_URL}#token=${encodeURIComponent(token)}`;
