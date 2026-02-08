@@ -7,7 +7,15 @@
  * - PUBLIC_SETUP_URL  (e.g. https://Kadge-Jatin.github.io/Valentines-Gifts_3/setup.html)
  * - PURCHASE_TTL_SECONDS (optional, default 7200)
  * - RAZORPAY_KEY_SECRET (optional; set when you configure Razorpay webhook)
+ *
+ * This version adds a /claim-return route so Razorpay can redirect the buyer
+ * after payment. The route will:
+ *  - accept a payment id query param (payment_id / paymentId / payment)
+ *  - reuse an already-created token for that payment if present
+ *  - otherwise issue a new token and store a payment -> token mapping
+ *  - redirect the buyer to PUBLIC_SETUP_URL#token=<token>
  */
+
 const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
@@ -33,13 +41,26 @@ const PUBLIC_SETUP_URL = process.env.PUBLIC_SETUP_URL || 'https://Kadge-Jatin.gi
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || '';
 const PURCHASE_TTL = parseInt(process.env.PURCHASE_TTL_SECONDS || '7200', 10);
 
-const purchaseKey = (t) => `purchase:${t}`;
+const purchaseKey = (token) => `purchase:${token}`;
+const paymentKey = (paymentId) => `payment:${paymentId}`;
 
 // issue a purchase token and store it in Redis with TTL
+// also store a mapping from paymentId -> token when paymentId is provided
 async function issuePurchaseToken(meta = {}) {
   const token = uuidv4();
   const key = purchaseKey(token);
-  await redis.set(key, JSON.stringify(Object.assign({ createdAt: Date.now() }, meta)), 'EX', PURCHASE_TTL);
+  const stored = Object.assign({ createdAt: Date.now() }, meta);
+  await redis.set(key, JSON.stringify(stored), 'EX', PURCHASE_TTL);
+
+  // if meta.paymentId exists, store a reverse mapping so we can reuse tokens on redirect
+  if (meta.paymentId) {
+    try {
+      await redis.set(paymentKey(meta.paymentId), token, 'EX', PURCHASE_TTL);
+    } catch (e) {
+      console.warn('failed to set payment->token mapping', e);
+    }
+  }
+
   return token;
 }
 
@@ -63,7 +84,7 @@ app.post('/admin/issue-token', async (req, res) => {
 
 // Verify endpoint used by uploader-server before accepting uploads
 app.get('/verify-purchase', async (req, res) => {
-  const token = req.query.token || req.headers['authorization'] && String(req.headers['authorization']).startsWith('Bearer ') ? String(req.headers['authorization']).slice(7) : null;
+  const token = req.query.token || (req.headers['authorization'] && String(req.headers['authorization']).startsWith('Bearer ') ? String(req.headers['authorization']).slice(7) : null);
   if (!token) return res.status(400).json({ error: 'missing_token' });
   const meta = await verifyPurchaseToken(token);
   if (!meta) return res.status(404).json({ error: 'invalid_or_expired' });
@@ -104,12 +125,47 @@ app.post('/razorpay-webhook', async (req, res) => {
   }
 });
 
-app.get('/health', (req, res) => res.json({ ok: true }));
+// Claim-return route for Razorpay redirect after payment
+// Example: Razorpay can be configured to redirect to:
+//   https://valentines-token-service.onrender.com/claim-return
+// Razorpay typically appends payment_id or other query params; this route accepts common names.
+app.get('/claim-return', async (req, res) => {
+  try {
+    const paymentId = req.query.payment_id || req.query.paymentId || req.query.paymentid || req.query.payment;
+    if (!paymentId) return res.status(400).send('missing payment_id');
 
-const port = process.env.PORT || 3000;
-app.listen(port, () => console.log(`Token service listening on ${port}`));
+    // If a token already exists for this payment, reuse it
+    let token = await redis.get(paymentKey(paymentId));
+    if (!token) {
+      // No existing token: issue a new one and set mapping
+      token = await issuePurchaseToken({ paymentId });
+      // issuePurchaseToken already sets the payment->token mapping
+    } else {
+      // token is stored as a plain string
+      // extend TTL for the token and mapping so buyer has time to use it
+      try {
+        await redis.expire(purchaseKey(token), PURCHASE_TTL);
+        await redis.expire(paymentKey(paymentId), PURCHASE_TTL);
+      } catch (e) {
+        console.warn('failed to extend TTLs', e);
+      }
+    }
+
+    const claimUrl = `${PUBLIC_SETUP_URL}#token=${encodeURIComponent(token)}`;
+    // Redirect the buyer to the client setup page with the token in the fragment
+    return res.redirect(claimUrl);
+  } catch (err) {
+    console.error('claim-return error', err);
+    return res.status(500).send('server error');
+  }
+});
+
+app.get('/health', (req, res) => res.json({ ok: true }));
 
 // serve landing.html at root so GET / works
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'landing.html'));
 });
+
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log(`Token service listening on ${port}`));
