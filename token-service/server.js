@@ -44,7 +44,12 @@ const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || ''; // API Key Se
 const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || ''; // webhook signing secret
 
 const CLAIM_RETURN_BASE = process.env.CLAIM_RETURN_BASE || `https://${process.env.RENDER_EXTERNAL_URL || 'valentines-token-service.onrender.com'}`;
-const PURCHASE_TTL = parseInt(process.env.PURCHASE_TTL_SECONDS || '7200', 10);
+// const PURCHASE_TTL = parseInt(process.env.PURCHASE_TTL_SECONDS || '7200', 10);
+
+// safe PURCHASE_TTL parsing with fallback to 7200 seconds (2 hours)
+const _envTtl = Number(process.env.PURCHASE_TTL_SECONDS);
+const PURCHASE_TTL = Number.isFinite(_envTtl) && _envTtl > 0 ? Math.floor(_envTtl) : 7200;
+console.log('PURCHASE_TTL set to', PURCHASE_TTL);
 
 const purchaseKey = (token) => `purchase:${token}`;
 const paymentKey = (paymentId) => `payment:${paymentId}`;
