@@ -108,3 +108,8 @@ app.get('/health', (req, res) => res.json({ ok: true }));
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Token service listening on ${port}`));
+
+// serve landing.html at root so GET / works
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'landing.html'));
+});
