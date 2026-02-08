@@ -44,7 +44,7 @@ const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || ''; // API Key Se
 const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || ''; // webhook signing secret
 
 const CLAIM_RETURN_BASE = process.env.CLAIM_RETURN_BASE || `https://${process.env.RENDER_EXTERNAL_URL || 'valentines-token-service.onrender.com'}`;
-const PURCHASE_TTL = parseInt(process.env.PURCHASE_TTL_SECONDS || 'value 7200', 10);
+const PURCHASE_TTL = parseInt(process.env.PURCHASE_TTL_SECONDS || '7200', 10);
 
 const purchaseKey = (token) => `purchase:${token}`;
 const paymentKey = (paymentId) => `payment:${paymentId}`;
