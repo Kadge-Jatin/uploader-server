@@ -8,23 +8,12 @@
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial; padding:20px; max-width:720px; margin: auto; color:#222; }
     .card { border:1px solid #eee; padding:18px; border-radius:10px; margin-top:18px; text-align:center; }
     .hero { text-align:center; margin-top:10px; }
-    .price { font-size:20px; margin-top:8px; display:inline-block; vertical-align:middle; }
-    .price .now { color:#e83e8c; font-weight:700; margin-right:8px; }
-    .price .was { color:#777; font-weight:600; margin-left:6px; }
-    .buy { display:inline-block; background:#e83e8c; color:white; padding:12px 20px; border-radius:8px; text-decoration:none; font-weight:700; border:0; cursor:pointer; font-size:16px; }
+    .buy { display:inline-flex; align-items:baseline; gap:8px; background:#e83e8c; color:white; padding:12px 20px; border-radius:8px; text-decoration:none; font-weight:700; border:0; cursor:pointer; font-size:16px; }
+    .price-now { color:#fff; font-size:18px; font-weight:800; }
+    .price-old { color:rgba(255,255,255,0.85); font-size:13px; font-weight:600; opacity:0.85; margin-left:6px; text-decoration:line-through; }
     .note { color:#666; font-size:14px; margin-top:12px; }
     img.demo { max-width:100%; border-radius:8px; margin-top:12px; }
     .status { margin-top:12px; color:#444; font-size:14px; }
-    .muted { color:#888; font-size:13px; margin-top:10px; }
-    .sr-only {
-      position: absolute !important;
-      height: 1px; width: 1px;
-      overflow: hidden;
-      clip: rect(1px, 1px, 1px, 1px);
-      white-space: nowrap; /* added line */
-    }
-    /* Strike style for original price */
-    .was s { color: #777; text-decoration: line-through; }
   </style>
 </head>
 <body>
@@ -44,27 +33,17 @@
 
     <img class="demo" src="https://via.placeholder.com/600x280?text=Valentine+Demo" alt="Demo">
 
-    <div style="margin-top:12px">
-      <!-- Replace the PAYMENT_LINK value in the script below with your Razorpay short_url -->
+    <p style="margin-top:12px">
+      <!-- Replace PAYMENT_LINK below with the Razorpay short_url you created in the dashboard -->
       <button id="buyBtn" class="buy" aria-live="polite" aria-busy="false">
-        <span class="price">
-          <span class="now">₹200</span>
-          <span class="was" aria-hidden="true"><s>₹250</s></span>
-        </span>
-        <span class="sr-only">Buy now — discounted from ₹250 to ₹200</span>
+        <span class="price-now">Buy now — ₹200</span>
+        <span class="price-old">₹250</span>
       </button>
-
-      <noscript>
-        <p style="margin-top:8px">
-          <a class="buy" href="https://rzp.io/your_short_url_here">Buy now — ₹200 <s>₹250</s></a>
-        </p>
-      </noscript>
-    </div>
+    </p>
 
     <div id="status" class="status" aria-live="polite"></div>
 
     <p class="note">This is a demo flow. Setup access is valid for 2 hours after purchase.</p>
-    <p class="muted">If the Razorpay short link is single‑use it will be unusable after someone pays. For an always‑open experience you can use the server-side create-payment-link API (requires API keys).</p>
   </div>
 
   <p style="text-align:center; margin-top:18px; color:#666; font-size:13px;">
@@ -73,13 +52,12 @@
 
 <script>
 (function () {
-  // Replace this with the Razorpay short_url you created in the dashboard.
-  // Example: const PAYMENT_LINK = 'https://rzp.io/abcd'
-  const PAYMENT_LINK = 'https://rzp.io/rzp/F7sFPVIa';
+  // Replace this with your Razorpay short link (e.g. 'https://rzp.io/abcd')
+  const PAYMENT_LINK = 'https://rzp.io/your_short_url_here';
 
   const buyBtn = document.getElementById('buyBtn');
   const statusEl = document.getElementById('status');
-  const originalHTML = buyBtn.innerHTML;
+  const originalHtml = buyBtn.innerHTML;
 
   function setStatus(text, isError) {
     statusEl.textContent = text;
@@ -88,24 +66,16 @@
 
   buyBtn.addEventListener('click', function () {
     if (!PAYMENT_LINK || PAYMENT_LINK.includes('your_short_url_here')) {
-      setStatus('Payment link not configured. Replace PAYMENT_LINK in the page with your Razorpay short_url.', true);
+      setStatus('Payment link not configured. Replace PAYMENT_LINK in the script with your Razorpay short_url.', true);
       return;
     }
 
-    try {
-      buyBtn.disabled = true;
-      buyBtn.setAttribute('aria-busy', 'true');
-      buyBtn.innerHTML = 'Opening payment...';
+    buyBtn.disabled = true;
+    buyBtn.setAttribute('aria-busy', 'true');
+    buyBtn.innerHTML = 'Opening payment...';
 
-      // Use same-tab navigation so Razorpay can redirect back to /claim-return and the flow completes.
-      window.location.href = PAYMENT_LINK;
-    } catch (err) {
-      console.error('Error redirecting to payment link', err);
-      setStatus('Failed to open payment link. Try again.', true);
-      buyBtn.disabled = false;
-      buyBtn.setAttribute('aria-busy', 'false');
-      buyBtn.innerHTML = originalHTML;
-    }
+    // Navigate same-tab so Razorpay can redirect back to /claim-return after payment
+    window.location.href = PAYMENT_LINK;
   });
 })();
 </script>
