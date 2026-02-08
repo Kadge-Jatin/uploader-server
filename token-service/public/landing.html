@@ -8,15 +8,23 @@
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial; padding:20px; max-width:720px; margin: auto; color:#222; }
     .card { border:1px solid #eee; padding:18px; border-radius:10px; margin-top:18px; text-align:center; }
     .hero { text-align:center; margin-top:10px; }
-    .price { font-size:20px; margin-top:8px; }
+    .price { font-size:20px; margin-top:8px; display:inline-block; vertical-align:middle; }
     .price .now { color:#e83e8c; font-weight:700; margin-right:8px; }
-    .price .was { color:#777; text-decoration:line-through; font-weight:600; }
+    .price .was { color:#777; font-weight:600; margin-left:6px; }
     .buy { display:inline-block; background:#e83e8c; color:white; padding:12px 20px; border-radius:8px; text-decoration:none; font-weight:700; border:0; cursor:pointer; font-size:16px; }
     .note { color:#666; font-size:14px; margin-top:12px; }
     img.demo { max-width:100%; border-radius:8px; margin-top:12px; }
     .status { margin-top:12px; color:#444; font-size:14px; }
-    .status a { color: #e83e8c; font-weight:600; text-decoration:none; }
     .muted { color:#888; font-size:13px; margin-top:10px; }
+    .sr-only {
+      position: absolute !important;
+      height: 1px; width: 1px;
+      overflow: hidden;
+      clip: rect(1px, 1px, 1px, 1px);
+      white-space: nowrap; /* added line */
+    }
+    /* Strike style for original price */
+    .was s { color: #777; text-decoration: line-through; }
   </style>
 </head>
 <body>
@@ -37,13 +45,15 @@
     <img class="demo" src="https://via.placeholder.com/600x280?text=Valentine+Demo" alt="Demo">
 
     <div style="margin-top:12px">
-      <!-- Primary buy button. The script below will navigate to PAYMENT_LINK when clicked.
-           Replace the string below with your Razorpay short_url (e.g. "https://rzp.io/abcd"). -->
+      <!-- Replace the PAYMENT_LINK value in the script below with your Razorpay short_url -->
       <button id="buyBtn" class="buy" aria-live="polite" aria-busy="false">
-        Buy now — <span class="now">₹200</span> <span class="was">₹250</span>
+        <span class="price">
+          <span class="now">₹200</span>
+          <span class="was" aria-hidden="true"><s>₹250</s></span>
+        </span>
+        <span class="sr-only">Buy now — discounted from ₹250 to ₹200</span>
       </button>
 
-      <!-- Non-JS fallback link (replace href with your short_url as well) -->
       <noscript>
         <p style="margin-top:8px">
           <a class="buy" href="https://rzp.io/your_short_url_here">Buy now — ₹200 <s>₹250</s></a>
@@ -54,7 +64,7 @@
     <div id="status" class="status" aria-live="polite"></div>
 
     <p class="note">This is a demo flow. Setup access is valid for 2 hours after purchase.</p>
-    <p class="muted">Note: If the Razorpay short link is single‑use it will be unusable after someone pays. If you want an always‑open experience, use the server create-payment-link API instead (requires API keys).</p>
+    <p class="muted">If the Razorpay short link is single‑use it will be unusable after someone pays. For an always‑open experience you can use the server-side create-payment-link API (requires API keys).</p>
   </div>
 
   <p style="text-align:center; margin-top:18px; color:#666; font-size:13px;">
@@ -65,10 +75,11 @@
 (function () {
   // Replace this with the Razorpay short_url you created in the dashboard.
   // Example: const PAYMENT_LINK = 'https://rzp.io/abcd'
-  const PAYMENT_LINK = 'https://rzp.io/your_short_url_here';
+  const PAYMENT_LINK = 'https://rzp.io/rzp/F7sFPVIa';
 
   const buyBtn = document.getElementById('buyBtn');
   const statusEl = document.getElementById('status');
+  const originalHTML = buyBtn.innerHTML;
 
   function setStatus(text, isError) {
     statusEl.textContent = text;
@@ -84,7 +95,7 @@
     try {
       buyBtn.disabled = true;
       buyBtn.setAttribute('aria-busy', 'true');
-      buyBtn.textContent = 'Opening payment...';
+      buyBtn.innerHTML = 'Opening payment...';
 
       // Use same-tab navigation so Razorpay can redirect back to /claim-return and the flow completes.
       window.location.href = PAYMENT_LINK;
@@ -93,7 +104,7 @@
       setStatus('Failed to open payment link. Try again.', true);
       buyBtn.disabled = false;
       buyBtn.setAttribute('aria-busy', 'false');
-      buyBtn.textContent = 'Buy now — ₹200 ₹250';
+      buyBtn.innerHTML = originalHTML;
     }
   });
 })();
