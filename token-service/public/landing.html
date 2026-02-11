@@ -296,6 +296,34 @@
       background:var(--rose);
       transform:scale(1.3);
     }
+
+    /* Swipe Hint */
+.swipe-hint {
+  display: none;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  margin-top: 20px;
+  color: var(--rose);
+  font-size: 1rem;
+  font-weight: 600;
+  animation: pulseHint 2s infinite;
+}
+
+.swipe-hint.show {
+  display: flex;
+}
+
+@keyframes pulseHint {
+  0%, 100% { opacity: 0.6; transform: translateX(0); }
+  50% { opacity: 1; transform: translateX(10px); }
+}
+
+.swipe-hint .arrow {
+  font-size: 1.5rem;
+}
+
+    
     
     /* Features Section */
     .features {
@@ -564,7 +592,7 @@
       <!-- Tab Navigation -->
       <!-- Tab Navigation -->
 <div class="demo-tabs">
-  <button class="tab-btn" data-tab="0"><span style="font-family: 'Sacramento', cursive; font-size: 1.8rem;">Step 1 :</span> Setup Your Greeting Card 📝</button>
+  <button class="tab-btn" data-tab="0"><span style="font-family: 'Sacramento', cursive; font-size: 1.8rem;">Step 1 :</span> Setting up Greeting Card 📝</button>
   <button class="tab-btn" data-tab="1"><span style="font-family: 'Sacramento', cursive; font-size: 1.8rem;">Step 2 :</span> Experience Preview 💖</button>
 </div>
       
@@ -610,6 +638,11 @@
         <span class="indicator active" data-index="0"></span>
         <span class="indicator" data-index="1"></span>
       </div>
+
+      <!-- ADD THIS NEW ELEMENT -->
+<div class="swipe-hint" id="swipeHint">
+  <span>Swipe to see next step</span>
+  <span class="arrow">👉</span>
     </div>
 
     <!-- Features Section -->
@@ -753,6 +786,7 @@
     const viewVideo = document.getElementById('viewVideo');
     const muteSetup = document.getElementById('muteSetup');
     const muteView = document.getElementById('muteView');
+    const swipeHint = document.getElementById('swipeHint'); // ADD THIS LINE
     
     let currentIndex = 0;
     let touchStartX = 0;
@@ -771,28 +805,49 @@
 
     // Update card position
     function updateCards(index) {
-      currentIndex = index;
-      demoCards.style.transform = `translateX(-${index * 100}%)`;
+  currentIndex = index;
+  demoCards.style.transform = `translateX(-${index * 100}%)`;
+  
+  // Update tabs
+  tabBtns.forEach((btn, index) => {
+  btn.addEventListener('click', () => {
+    demoCardsWrapper.classList.add('show');
+    updateCards(index);
+    
+    // ADD THIS: Scroll to bottom of the cards wrapper
+    setTimeout(() => {
+      const wrapperRect = demoCardsWrapper.getBoundingClientRect();
+      const wrapperBottom = wrapperRect.bottom + window.scrollY;
       
-      // Update tabs
-      tabBtns.forEach((btn, i) => {
-        btn.classList.toggle('active', i === index);
+      window.scrollTo({
+        top: wrapperBottom - window.innerHeight + 100, // 100px offset from bottom
+        behavior: 'smooth'
       });
-      
-      // Update indicators
-      indicators.forEach((ind, i) => {
-        ind.classList.toggle('active', i === index);
-      });
-      
-      // Video management - play current, pause others
-      if (index === 0) {
-        setupVideo.play().catch(() => {});
-        viewVideo.pause();
-      } else {
-        viewVideo.play().catch(() => {});
-        setupVideo.pause();
-      }
-    }
+    }, 100); // Small delay to ensure wrapper is shown
+  });
+});
+  
+  // Update indicators
+  indicators.forEach((ind, i) => {
+    ind.classList.toggle('active', i === index);
+  });
+  
+  // ADD THIS: Show/hide swipe hint
+  if (index === 0) {
+    swipeHint.classList.add('show');
+  } else {
+    swipeHint.classList.remove('show');
+  }
+  
+  // Video management - play current, pause others
+  if (index === 0) {
+    setupVideo.play().catch(() => {});
+    viewVideo.pause();
+  } else {
+    viewVideo.play().catch(() => {});
+    setupVideo.pause();
+  }
+}
 
     // Tab click handlers
     // Tab click handlers
