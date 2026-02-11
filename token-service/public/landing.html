@@ -160,7 +160,13 @@
       position:relative;
       overflow:hidden;
       border-radius:30px;
+      display:none;  /* ADD THIS LINE */
+      margin-top:30px; /* ADD THIS LINE */
     }
+
+    .demo-cards-wrapper.show {
+  display:block;
+}
     
     .demo-cards {
       display:flex;
@@ -558,7 +564,7 @@
       <!-- Tab Navigation -->
       <!-- Tab Navigation -->
 <div class="demo-tabs">
-  <button class="tab-btn active" data-tab="0"><span style="font-family: 'Sacramento', cursive; font-size: 1.8rem;">Step 1 :</span> Setup Your Greeting Card 📝</button>
+  <button class="tab-btn" data-tab="0"><span style="font-family: 'Sacramento', cursive; font-size: 1.8rem;">Step 1 :</span> Setup Your Greeting Card 📝</button>
   <button class="tab-btn" data-tab="1"><span style="font-family: 'Sacramento', cursive; font-size: 1.8rem;">Step 2 :</span> Experience Preview 💖</button>
 </div>
       
@@ -789,11 +795,15 @@
     }
 
     // Tab click handlers
-    tabBtns.forEach((btn, index) => {
-      btn.addEventListener('click', () => {
-        updateCards(index);
-      });
-    });
+    // Tab click handlers
+const demoCardsWrapper = document.querySelector('.demo-cards-wrapper');
+
+tabBtns.forEach((btn, index) => {
+  btn.addEventListener('click', () => {
+    demoCardsWrapper.classList.add('show'); // Show the cards
+    updateCards(index);
+  });
+});
 
     // Indicator click handlers
     indicators.forEach((ind, index) => {
