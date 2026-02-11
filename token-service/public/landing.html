@@ -234,7 +234,7 @@
     }
     
     .video-container {
-      max-width:350px;
+      max-width:280px;
       margin:0 auto;
       position:relative;
       border-radius:20px;
@@ -793,6 +793,12 @@
         setupVideo.pause();
       }
     }
+
+    // Auto-scroll to features section after view video
+viewVideo.addEventListener('ended', () => {
+  const featuresSection = document.querySelector('.features');
+  featuresSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
 
     // Tab click handlers
     // Tab click handlers
