@@ -812,12 +812,14 @@
   // Update tabs
   tabBtns.forEach((btn, index) => {
   btn.addEventListener('click', () => {
-    const wasHidden = !demoCardsWrapper.classList.contains('show');
-    
     demoCardsWrapper.classList.add('show');
+    
+    // Force browser to recalculate layout
+    demoCardsWrapper.offsetHeight; // This line forces reflow
+    
     updateCards(index);
     
-    // Scroll after showing cards
+    // Scroll after cards are visible and rendered
     setTimeout(() => {
       const wrapperRect = demoCardsWrapper.getBoundingClientRect();
       const wrapperBottom = wrapperRect.bottom + window.scrollY;
@@ -826,7 +828,7 @@
         top: wrapperBottom - window.innerHeight + 100,
         behavior: 'smooth'
       });
-    }, wasHidden ? 300 : 100); // Longer delay if cards were hidden
+    }, 350); // Increase delay to ensure rendering is complete
   });
 });
   
