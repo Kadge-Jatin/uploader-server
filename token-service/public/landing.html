@@ -805,39 +805,22 @@
     });
 
     // Update card position
-    function updateCards(index) {
+    // Update card position
+function updateCards(index) {
   currentIndex = index;
   demoCards.style.transform = `translateX(-${index * 100}%)`;
   
   // Update tabs
-  tabBtns.forEach((btn, index) => {
-  btn.addEventListener('click', () => {
-    demoCardsWrapper.classList.add('show');
-    
-    // Force browser to recalculate layout
-    demoCardsWrapper.offsetHeight; // This line forces reflow
-    
-    updateCards(index);
-    
-    // Scroll after cards are visible and rendered
-    setTimeout(() => {
-      const wrapperRect = demoCardsWrapper.getBoundingClientRect();
-      const wrapperBottom = wrapperRect.bottom + window.scrollY;
-      
-      window.scrollTo({
-        top: wrapperBottom - window.innerHeight + 100,
-        behavior: 'smooth'
-      });
-    }, 350); // Increase delay to ensure rendering is complete
+  tabBtns.forEach((btn, i) => {
+    btn.classList.toggle('active', i === index);
   });
-});
   
   // Update indicators
   indicators.forEach((ind, i) => {
     ind.classList.toggle('active', i === index);
   });
   
-  // ADD THIS: Show/hide swipe hint
+  // Show/hide swipe hint
   if (index === 0) {
     swipeHint.classList.add('show');
   } else {
@@ -856,12 +839,28 @@
 
     // Tab click handlers
     // Tab click handlers
+// Tab click handlers
 const demoCardsWrapper = document.querySelector('.demo-cards-wrapper');
 
 tabBtns.forEach((btn, index) => {
   btn.addEventListener('click', () => {
-    demoCardsWrapper.classList.add('show'); // Show the cards
+    demoCardsWrapper.classList.add('show');
+    
+    // Force browser to recalculate layout
+    demoCardsWrapper.offsetHeight;
+    
     updateCards(index);
+    
+    // Scroll after cards are visible and rendered
+    setTimeout(() => {
+      const wrapperRect = demoCardsWrapper.getBoundingClientRect();
+      const wrapperBottom = wrapperRect.bottom + window.scrollY;
+      
+      window.scrollTo({
+        top: wrapperBottom - window.innerHeight + 100,
+        behavior: 'smooth'
+      });
+    }, 350);
   });
 });
 
