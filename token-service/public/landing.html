@@ -325,6 +325,35 @@
   font-size: 1.5rem;
 }
 
+    /* Scroll Down Message */
+.scroll-down-msg {
+  display: none;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  margin-top: 20px;
+  color: var(--rose);
+  font-size: 1rem;
+  font-weight: 600;
+  animation: pulseScroll 2s infinite;
+}
+
+.scroll-down-msg.show {
+  display: flex;
+}
+
+@keyframes pulseScroll {
+  0%, 100% { opacity: 0.6; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(5px); }
+}
+
+.scroll-down-msg .arrow-down {
+  font-size: 1.5rem;
+}
+    
+
+    
+
     
     
     /* Features Section */
@@ -642,10 +671,19 @@
       </div>
 
       <!-- ADD THIS NEW ELEMENT -->
+<!-- Swipe Hint -->
 <div class="swipe-hint" id="swipeHint">
   <span>Swipe to see next step</span>
   <span class="arrow">👉</span>
-    </div>
+</div>
+
+<!-- ADD THIS NEW ELEMENT -->
+<div class="scroll-down-msg" id="scrollDownMsg">
+  <span>Scroll down to know more and setup your own personalized Greeting Card</span>
+  <span class="arrow-down">👇</span>
+</div>
+
+      
 
     <!-- Features Section -->
     <div class="features">
@@ -788,7 +826,9 @@
     const viewVideo = document.getElementById('viewVideo');
     const muteSetup = document.getElementById('muteSetup');
     const muteView = document.getElementById('muteView');
-    const swipeHint = document.getElementById('swipeHint'); // ADD THIS LINE
+    const swipeHint = document.getElementById('swipeHint');
+const scrollDownMsg = document.getElementById('scrollDownMsg'); // ADD THIS LINE
+    
     
     let currentIndex = 0;
     let touchStartX = 0;
@@ -821,11 +861,13 @@ function updateCards(index) {
     ind.classList.toggle('active', i === index);
   });
   
-  // Show/hide swipe hint
+  // Show/hide swipe hint and scroll message
   if (index === 0) {
     swipeHint.classList.add('show');
+    scrollDownMsg.classList.remove('show');  // ADD THIS
   } else {
     swipeHint.classList.remove('show');
+    scrollDownMsg.classList.add('show');     // ADD THIS
   }
   
   // Video management - play current, pause others
